@@ -119,15 +119,12 @@ function Get-ApiAuthInfo {
 		if (-not (Test-Path -Path $RegistryKeyPath)) {
 			Write-Warning 'No PSYouTube API info found in registry'
 		} else {
-			$keyValues = Get-ItemProperty -Path $RegistryKeyPath
-			$rt = decrypt $keyValues.RefreshToken
-			$at = decrypt $keyValues.AccessToken
-			$key = decrypt $keyValues.APIKey
-			[pscustomobject]@{
-				'AccessToken'  = $at
-				'RefreshToken' = $rt
-				'APIKey'       = $key
+			$keys = (Get-Item -Path $RegistryKeyPath).Property
+			$ht = @{}
+			foreach ($key in $keys) {
+				$ht[$key] = decrypt (Get-ItemProperty -Path $RegistryKeyPath).$key
 			}
+			[pscustomobject]$ht
 		}
 	} catch {
 		Write-Error $_.Exception.Message
@@ -137,22 +134,24 @@ function Get-ApiAuthInfo {
 function Save-ApiAuthInfo {
 	[CmdletBinding()]
 	param (
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName, ParameterSetName = 'Token')]
-		[ValidateNotNullOrEmpty()]
+		[Parameter()]
+		[string]$ClientId,
+
+		[Parameter()]
+		[string]$ClientSecret,
+
+		[Parameter(ValueFromPipelineByPropertyName)]
 		[Alias('access_token')]
 		[string]$AccessToken,
 	
-		[Parameter(Mandatory, ValueFromPipelineByPropertyName, ParameterSetName = 'Token')]
-		[ValidateNotNullOrEmpty()]
+		[Parameter(ValueFromPipelineByPropertyName)]
 		[Alias('refresh_token')]
 		[string]$RefreshToken,
 
-		[Parameter(Mandatory, ParameterSetName = 'APIKey')]
-		[ValidateNotNullOrEmpty()]
+		[Parameter()]
 		[string]$APIKey,
 	
 		[Parameter()]
-		[ValidateNotNullOrEmpty()]
 		[string]$RegistryKeyPath = "HKCU:\Software\PSYouTube"
 	)
 
@@ -169,11 +168,7 @@ function Save-ApiAuthInfo {
 			New-Item -Path ($RegistryKeyPath | Split-Path -Parent) -Name ($RegistryKeyPath | Split-Path -Leaf) | Out-Null
 		}
 		
-		if ($PSCmdlet.ParameterSetName -eq 'Token') {
-			$values = 'AccessToken', 'RefreshToken'
-		} else {
-			$values = 'APIKey'
-		}
+		$values = $PSBoundParameters.GetEnumerator().where({ $_.Key -ne 'RegistryKeyPath' -and $_.Value}) | Select-Object -ExpandProperty Key
 		
 		foreach ($val in $values) {
 			Write-Verbose "Creating $RegistryKeyPath\$val"
@@ -232,15 +227,15 @@ function Invoke-YouTubeApiCall {
 	$ErrorActionPreference = 'Stop'
 
 	$invRestParams = @{
-		Method = $HTTPMethod
-		Uri    = 'https://www.googleapis.com/youtube/v3/{0}?part=snippet' -f $ApiMethod
+		Method      = $HTTPMethod
+		Uri         = 'https://www.googleapis.com/youtube/v3/{0}?part=snippet' -f $ApiMethod
+		ErrorAction = 'Stop'
 	}
-	$apiPayload = @{
-		key = (Get-ApiAuthInfo).APIKey
-	}
+	$apiPayload = @{}
 
 	if ($HTTPMethod -eq 'GET') {
 		$apiPayload.maxResults = 50
+		$apiPayload.key = (Get-ApiAuthInfo).APIKey
 	} else {
 		$invRestParams.Headers = @{ 
 			'Authorization' = "Bearer $((Get-ApiAuthInfo).AccessToken)" 
@@ -259,14 +254,35 @@ function Invoke-YouTubeApiCall {
 	}
 	$invRestParams.Body = $body
 
-	$result = Invoke-RestMethod @invRestParams
+	try {
+		$result = Invoke-RestMethod @invRestParams
+	} catch {
+		if ($_.Exception.Message -like '*(401) Unauthorized*') {
+			## The token may be expired. Grab another one using the refresh token and try again
+			$apiCred = Get-ApiAuthInfo
+			$tokens = Request-AccessToken -ClientId $apiCred.ClientId -ClientSecret $apiCred.ClientSecret -RefreshToken $apiCred.RefreshToken
+			$tokens | Save-ApiAuthInfo
+			$invParams = @{
+				Payload    = $Payload
+				HTTPMethod = $HTTPMethod
+				ApiMethod  = $ApiMethod
+			}
+			if ($PageToken) {
+				$invParams.PageToken = $PageToken
+			}
+			Invoke-YouTubeApiCall @invParams
+		} else {
+			$PSCmdlet.ThrowTerminatingError($_)
+		}
+	}
+
 	if ('items' -in $result.PSObject.Properties.Name) {
 		$output = $result.items
 	} else {
 		$output = $result
 	}
-	$output #| ConvertTo-PSYouTubeObject
-	
+	$output | ConvertTo-PSYouTubeObject
+
 	if ($result.PSObject.Properties.Name -contains 'nextPageToken') {
 		Invoke-YouTubeApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod
 	}
@@ -409,6 +425,41 @@ function Get-PlaylistItem {
 	
 # }
 
+function Update-Video {
+	[OutputType('void')]
+	[CmdletBinding()]
+	param
+	(
+		[Parameter(Mandatory, ValueFromPipeline)]
+		[ValidateNotNullOrEmpty()]
+		[pscustomobject]$Video,
+
+		[Parameter(Mandatory)]
+		[ValidateNotNullOrEmpty()]
+		[string]$Description
+	)
+
+	begin {
+		$ErrorActionPreference = 'Stop'
+	}
+
+	process {
+		## Forced to pass the category ID so and the search API won't show it
+		$vid = Get-Video -VideoId $Video.videoId
+
+		$payload = @{
+			id      = $Video.videoId
+			snippet = @{
+				'title'       = $Video.title
+				'categoryId'  = $vid.categoryId
+				'description' = $Description
+			}
+		}
+
+		$null = Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod PUT
+	}
+}
+
 function Add-Tag {
 	[OutputType('void')]
 	[CmdletBinding()]
@@ -424,24 +475,37 @@ function Add-Tag {
 
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
+		[switch]$Replace,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
 		[switch]$PassThru
 	)
 
 	begin {
 		$ErrorActionPreference = 'Stop'
-
-		$payload = @{
-			# part = 'snippet'
-		}
 	}
 
 	process {
+		## Forced to pass the category ID so and the search API won't show it
+		$vid = Get-Video -VideoId $Video.videoId
+
+		## Ensure there are no dup tags to be set
+		$dedupedTags = $Tag | Select-Object -Unique
+
+		if ((@($vid.Tags).Count -gt 0) -and -not $Replace.IsPresent) {
+			$existingTags = $vid.Tags
+			$tagsToSet = @($dedupedTags) + @($existingTags)
+		} else {
+			$tagsToSet = @($dedupedTags)
+		}
+
 		$payload = @{
 			id      = $Video.videoId
 			snippet = @{
-				'title' = $Video.title
-				# 'categoryId' = '27'
-				'tags'  = @($Tag)
+				'title'      = $Video.title
+				'categoryId' = $vid.categoryId
+				'tags'       = $tagsToSet
 			}
 		}
 
