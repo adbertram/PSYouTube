@@ -177,7 +177,7 @@ function Save-ApiAuthInfo {
 	}
 }
 
-function ConvertTo-PSYouTubeObject {
+function ConvertTo-PSYouTubeDataObject {
 	[OutputType('pscustomobject')]
 	[CmdletBinding()]
 	param
@@ -200,7 +200,108 @@ function ConvertTo-PSYouTubeObject {
 	}
 }
 
-function Invoke-YouTubeApiCall {
+function ConvertTo-PSYouTubeAnalyticsObject {
+	[OutputType('pscustomobject')]
+	[CmdletBinding()]
+	param
+	(
+		[Parameter(Mandatory, ValueFromPipeline)]
+		[ValidateNotNullOrEmpty()]
+		[pscustomobject]$InputObject
+	)
+
+	begin {
+		$ErrorActionPreference = 'Stop'
+	}
+
+	process {
+		$output = $InputObject.snippet
+		$InputObject.id.PSObject.Properties | foreach {
+			$output | Add-Member -MemberType NoteProperty -Name $_.Name -Value $_.Value
+		}
+		$output
+	}
+}
+
+function Invoke-YouTubeAnalyticsApiCall {
+	## Must enable the YouTube Analytics API on the project you're querying in the Google Developers Console
+	[OutputType('pscustomobject')]
+	[CmdletBinding()]
+	param
+	(
+		[Parameter(Mandatory)]
+		[ValidateNotNullOrEmpty()]
+		[hashtable]$Payload,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$PageToken,
+
+		[Parameter(Mandatory)]
+		[ValidateNotNullOrEmpty()]
+		[ValidateSet('reports')]
+		[string]$ApiMethod
+	)
+
+	$ErrorActionPreference = 'Stop'
+
+	$invRestParams = @{
+		Method      = 'GET'
+		Uri         = 'https://youtubeanalytics.googleapis.com/v2/{0}' -f $ApiMethod		
+		Headers     = @{ 
+			'Authorization' = "Bearer $((Get-ApiAuthInfo).AccessToken)" 
+			'Content-Type'  = 'application/json'
+		}
+		ErrorAction = 'Stop'
+	}
+	$apiPayload = @{
+		maxResults = 50
+		# key        = (Get-ApiAuthInfo).APIKey
+	}
+
+	$body = $Payload + $apiPayload
+
+	if ($PageToken) {
+		$body['pageToken'] = $PageToken
+	}
+	
+	$invRestParams.Body = $body
+
+	try {
+		$result = Invoke-RestMethod @invRestParams
+	} catch {
+		if ($_.Exception.Message -like '*(401) Unauthorized*') {
+			## The token may be expired. Grab another one using the refresh token and try again
+			$apiCred = Get-ApiAuthInfo
+			$tokens = Request-AccessToken -ClientId $apiCred.ClientId -ClientSecret $apiCred.ClientSecret -RefreshToken $apiCred.RefreshToken
+			$tokens | Save-ApiAuthInfo
+			$invParams = @{
+				Payload   = $Payload
+				ApiMethod = $ApiMethod
+			}
+			if ($PageToken) {
+				$invParams.PageToken = $PageToken
+			}
+			Invoke-YouTubeDataApiCall @invParams
+		} else {
+			$PSCmdlet.ThrowTerminatingError($_)
+		}
+	}
+
+	if ('items' -in $result.PSObject.Properties.Name) {
+		$output = $result.items
+	} else {
+		$output = $result
+	}
+	$output | ConvertTo-PSYouTubeAnalyticsObject
+
+	if ($result.PSObject.Properties.Name -contains 'nextPageToken') {
+		Invoke-YouTubeDataApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod
+	}
+}
+
+function Invoke-YouTubeDataApiCall {
+	## Must enable the YouTube Data API on the project you're querying in the Google Developers Console
 	[OutputType('pscustomobject')]
 	[CmdletBinding()]
 	param
@@ -270,7 +371,7 @@ function Invoke-YouTubeApiCall {
 			if ($PageToken) {
 				$invParams.PageToken = $PageToken
 			}
-			Invoke-YouTubeApiCall @invParams
+			Invoke-YouTubeDataApiCall @invParams
 		} else {
 			$PSCmdlet.ThrowTerminatingError($_)
 		}
@@ -281,10 +382,10 @@ function Invoke-YouTubeApiCall {
 	} else {
 		$output = $result
 	}
-	$output | ConvertTo-PSYouTubeObject
+	$output | ConvertTo-PSYouTubeDataObject
 
 	if ($result.PSObject.Properties.Name -contains 'nextPageToken') {
-		Invoke-YouTubeApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod
+		Invoke-YouTubeDataApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod
 	}
 }
 
@@ -305,7 +406,7 @@ function Get-Video {
 		id   = $VideoId -join ','
 	}
 
-	Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'videos'
+	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'videos'
 }
 
 function Get-ChannelVideo {
@@ -327,7 +428,7 @@ function Get-ChannelVideo {
 		type      = 'video'
 	}
 
-	Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'search'
+	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'search'
 }
 
 function Get-Channel {
@@ -347,7 +448,7 @@ function Get-Channel {
 		forUsername = $Username
 	}
 	
-	Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'channels'
+	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'channels'
 }
 
 function Get-Playlist {
@@ -371,7 +472,7 @@ function Get-Playlist {
 		channelId = $ChannelId
 	}
 	
-	$result = Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'playlists'
+	$result = Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'playlists'
 	if ($PSBoundParameters.ContainsKey('Name')) {
 		$result | Where-Object { $_.snippet.title -in $Name }
 	} else {
@@ -396,7 +497,7 @@ function Get-PlaylistItem {
 		playlistId = $PlaylistId
 	}
 
-	Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'playlistItems'
+	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'playlistItems'
 }
 
 # function AddTo-Playlist {
@@ -421,7 +522,7 @@ function Get-PlaylistItem {
 # 		resourceId = $VideoId
 # 	}
 
-# 	Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'playlistItems' -HTTPMethod POST
+# 	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'playlistItems' -HTTPMethod POST
 	
 # }
 
@@ -456,7 +557,7 @@ function Update-Video {
 			}
 		}
 
-		$null = Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod PUT
+		$null = Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod PUT
 	}
 }
 
@@ -509,7 +610,7 @@ function Add-Tag {
 			}
 		}
 
-		$result = Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod PUT
+		$result = Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod PUT
 		if ($PassThru.IsPresent) {
 			$result
 		}
