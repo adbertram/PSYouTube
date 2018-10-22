@@ -403,10 +403,17 @@ function Get-Video {
 
 	$payload = @{
 		part = 'snippet,contentDetails'
-		id   = $VideoId -join ','
 	}
 
-	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'videos'
+	## Split out into groups no larger than 50. 50 is the max at one time
+	$i = 0
+	do {
+		$ids = $VideoId | Select-Object -First 50 -Skip $i
+		$payload.id = $ids -join ','
+		Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'videos'
+		$i += 50
+		$processedIds += $ids
+	} while ($processedIds.Count -lt @($VideoId).Count)
 }
 
 function Get-ChannelVideo {
