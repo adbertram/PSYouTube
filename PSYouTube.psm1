@@ -177,52 +177,6 @@ function Save-ApiAuthInfo {
 	}
 }
 
-function ConvertTo-PSYouTubeDataObject {
-	[OutputType('pscustomobject')]
-	[CmdletBinding()]
-	param
-	(
-		[Parameter(Mandatory, ValueFromPipeline)]
-		[ValidateNotNullOrEmpty()]
-		[pscustomobject]$InputObject
-	)
-
-	begin {
-		$ErrorActionPreference = 'Stop'
-	}
-
-	process {
-		$output = $InputObject.snippet
-		$InputObject.id.PSObject.Properties | foreach {
-			$output | Add-Member -MemberType NoteProperty -Name $_.Name -Value $_.Value
-		}
-		$output
-	}
-}
-
-function ConvertTo-PSYouTubeAnalyticsObject {
-	[OutputType('pscustomobject')]
-	[CmdletBinding()]
-	param
-	(
-		[Parameter(Mandatory, ValueFromPipeline)]
-		[ValidateNotNullOrEmpty()]
-		[pscustomobject]$InputObject
-	)
-
-	begin {
-		$ErrorActionPreference = 'Stop'
-	}
-
-	process {
-		$output = $InputObject.snippet
-		$InputObject.id.PSObject.Properties | foreach {
-			$output | Add-Member -MemberType NoteProperty -Name $_.Name -Value $_.Value
-		}
-		$output
-	}
-}
-
 function Invoke-YouTubeAnalyticsApiCall {
 	## Must enable the YouTube Analytics API on the project you're querying in the Google Developers Console
 	[OutputType('pscustomobject')]
@@ -293,7 +247,7 @@ function Invoke-YouTubeAnalyticsApiCall {
 	} else {
 		$output = $result
 	}
-	$output | ConvertTo-PSYouTubeAnalyticsObject
+	$output
 
 	if ($result.PSObject.Properties.Name -contains 'nextPageToken') {
 		Invoke-YouTubeDataApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod
@@ -329,14 +283,17 @@ function Invoke-YouTubeDataApiCall {
 
 	$invRestParams = @{
 		Method      = $HTTPMethod
-		Uri         = 'https://www.googleapis.com/youtube/v3/{0}?part=snippet' -f $ApiMethod
+		Uri         = 'https://www.googleapis.com/youtube/v3/{0}' -f $ApiMethod
 		ErrorAction = 'Stop'
 	}
 	$apiPayload = @{}
 
 	if ($HTTPMethod -eq 'GET') {
 		$apiPayload.maxResults = 50
-		$apiPayload.key = (Get-ApiAuthInfo).APIKey
+		# $apiPayload.key = (Get-ApiAuthInfo).APIKey
+		$invRestParams.Headers = @{ 
+			'Authorization' = "Bearer $((Get-ApiAuthInfo).AccessToken)" 
+		}
 	} else {
 		$invRestParams.Headers = @{ 
 			'Authorization' = "Bearer $((Get-ApiAuthInfo).AccessToken)" 
@@ -382,7 +339,7 @@ function Invoke-YouTubeDataApiCall {
 	} else {
 		$output = $result
 	}
-	$output | ConvertTo-PSYouTubeDataObject
+	$output
 
 	if ($result.PSObject.Properties.Name -contains 'nextPageToken') {
 		Invoke-YouTubeDataApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod
@@ -416,6 +373,29 @@ function Get-Video {
 	} while ($processedIds.Count -lt @($VideoId).Count)
 }
 
+function ConvertTo-Timespan {
+	[OutputType('System.TimeSpan')]
+	[CmdletBinding()]
+	param
+	(
+		[Parameter(Mandatory)]
+		[ValidateNotNullOrEmpty()]
+		[string]$VideoDuration
+	)
+
+	$ErrorActionPreference = 'Stop'
+
+	try {
+		if ($VideoDuration -match 'PT(?<Minutes>\d+)M(?<Seconds>\d+)') {
+			New-Timespan -Minutes $matches.Minutes -Seconds $matches.Seconds
+		} else {
+			throw 'Unable to convert video duration to timespan'
+		}
+	} catch {
+		$PSCmdlet.ThrowTerminatingError($_)
+	}
+}
+
 function Get-ChannelVideo {
 	[OutputType('pscustomobject')]
 	[CmdletBinding()]
@@ -427,12 +407,17 @@ function Get-ChannelVideo {
 	)
 
 	## NOTE: The API can sometimes take awhile to show newly published videos
-	## You will only supposedly be able to get up to 500 videos this way.
 	$ErrorActionPreference = 'Stop'
 
 	$payload = @{
-		channelId = $ChannelId
-		type      = 'video'
+		part    = 'snippet'
+		# channelId = $ChannelId ## this restrict the total videos displayed to 500
+		type    = 'video'
+		forMine = 'true'
+		## These may have to be done once the channel gets over 500. Not sure.
+		# order           = 'date'
+		# publishedAfter  = '2018-10-01T00:00:00Z'
+		# publishedBefore = '2018-10-10T00:00:00Z'
 	}
 
 	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'search'
