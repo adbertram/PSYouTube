@@ -281,9 +281,9 @@ function Invoke-YouTubeDataApiCall {
 
 	$ErrorActionPreference = 'Stop'
 
+	$uri = 'https://www.googleapis.com/youtube/v3/{0}' -f $ApiMethod
 	$invRestParams = @{
 		Method      = $HTTPMethod
-		Uri         = 'https://www.googleapis.com/youtube/v3/{0}' -f $ApiMethod
 		ErrorAction = 'Stop'
 	}
 	$apiPayload = @{}
@@ -308,9 +308,15 @@ function Invoke-YouTubeDataApiCall {
 	}
 	
 	if ($HTTPMethod -ne 'GET') {
-		$body = $body | ConvertTo-Json	
+		if ($body.ContainsKey('part')) {
+			$part = $body.part
+			$body.Remove('part')
+			$uri = '{0}?part={1}' -f $uri, [uri]::EscapeDataString($part)
+		}
+		$body = $body | ConvertTo-Json -Depth 5
 	}
 	$invRestParams.Body = $body
+	$invRestParams.Uri = $uri
 
 	try {
 		$result = Invoke-RestMethod @invRestParams
@@ -359,7 +365,7 @@ function Get-Video {
 	$ErrorActionPreference = 'Stop'
 
 	$payload = @{
-		part = 'snippet,contentDetails'
+		part = 'snippet,contentDetails,status'
 	}
 
 	## Split out into groups no larger than 50. 50 is the max at one time
@@ -527,9 +533,21 @@ function Update-Video {
 		[ValidateNotNullOrEmpty()]
 		[pscustomobject]$Video,
 
-		[Parameter(Mandatory)]
+		[Parameter()]
 		[ValidateNotNullOrEmpty()]
-		[string]$Description
+		[string]$Description,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$Name,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string[]]$Tag,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$PrivacyStatus
 	)
 
 	begin {
@@ -537,19 +555,37 @@ function Update-Video {
 	}
 
 	process {
-		## Forced to pass the category ID so and the search API won't show it
-		$vid = Get-Video -VideoId $Video.videoId
-
-		$payload = @{
-			id      = $Video.videoId
-			snippet = @{
-				'title'       = $Video.title
-				'categoryId'  = $vid.categoryId
-				'description' = $Description
-			}
+		if ($PSBoundParameters.ContainsKey('Description')) {
+			$Video.snippet.description = $Description
 		}
-
-		$null = Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod PUT
+		if ($PSBoundParameters.ContainsKey('Tags')) {
+			$Video.snippet.tags = $Tags
+		}
+		if ($PSBoundParameters.ContainsKey('PrivacyStatus')) {
+			$Video.snippet.privacyStatus = $PrivacyStatus
+		}
+		if ($PSBoundParameters.ContainsKey('Name')) {
+			$Video.snippet.title = $Name
+		}
+		if ($PSBoundParameters.Keys.Count -gt 1) {
+			$payload = @{
+				part    = 'snippet,status'
+				id      = $Video.id
+				kind    = $Video.kind
+				snippet = @{
+					title       = $Video.snippet.title
+					categoryId  = $Video.snippet.categoryId
+					description = $Video.snippet.description
+					tags        = $Video.snippet.tags
+				}
+				status  = @{
+					privacyStatus = $Video.status.privacyStatus
+				}
+			}
+			$null = Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod PUT
+		} else {
+			Write-Error -Message 'No attributes to change.'
+		}
 	}
 }
 
