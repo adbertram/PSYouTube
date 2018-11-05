@@ -498,32 +498,6 @@ function Get-PlaylistItem {
 	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'playlistItems'
 }
 
-# function AddTo-Playlist {
-# 	[OutputType('void')]
-# 	[CmdletBinding()]
-# 	param
-# 	(
-# 		[Parameter(Mandatory)]
-# 		[ValidateNotNullOrEmpty()]
-# 		[string]$PlaylistId,
-		
-# 		[Parameter()]
-# 		[ValidateNotNullOrEmpty()]
-# 		[string]$VideoId
-# 	)
-
-# 	$ErrorActionPreference = 'Stop'
-
-# 	$payload = @{
-# 		part       = 'snippet,id'
-# 		playlistId = $PlaylistId
-# 		resourceId = $VideoId
-# 	}
-
-# 	Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'playlistItems' -HTTPMethod POST
-	
-# }
-
 function Update-Video {
 	[OutputType('void')]
 	[CmdletBinding()]
