@@ -270,18 +270,24 @@ function Invoke-YouTubeDataApiCall {
 
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
-		[ValidateSet('GET', 'POST', 'PUT')]
 		[string]$HTTPMethod = 'GET',
 
 		[Parameter(Mandatory)]
 		[ValidateNotNullOrEmpty()]
 		[ValidateSet('search', 'playlistItems', 'videos', 'playlists', 'channels')]
-		[string]$ApiMethod
+		[string]$ApiMethod,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$Uri
 	)
 
 	$ErrorActionPreference = 'Stop'
 
-	$uri = 'https://www.googleapis.com/youtube/v3/{0}' -f $ApiMethod
+	if (-not $PSBoundParameters.ContainsKey('Uri')) {
+		$uri = 'https://www.googleapis.com/youtube/v3/{0}' -f $ApiMethod	
+	}
+	
 	$invRestParams = @{
 		Method      = $HTTPMethod
 		ErrorAction = 'Stop'
@@ -315,7 +321,10 @@ function Invoke-YouTubeDataApiCall {
 		}
 		$body = $body | ConvertTo-Json -Depth 5
 	}
-	$invRestParams.Body = $body
+
+	if ($HTTPMethod -ne 'DELETE') {
+		$invRestParams.Body = $body
+	}
 	$invRestParams.Uri = $uri
 
 	try {
@@ -560,6 +569,25 @@ function Update-Video {
 		} else {
 			Write-Error -Message 'No attributes to change.'
 		}
+	}
+}
+
+function Remove-Video {
+	[OutputType('void')]
+	[CmdletBinding()]
+	param
+	(
+		[Parameter(Mandatory, ValueFromPipeline)]
+		[ValidateNotNullOrEmpty()]
+		[pscustomobject]$Video
+	)
+
+	begin {
+		$ErrorActionPreference = 'Stop'
+	}
+
+	process {
+		$null = Invoke-YouTubeDataApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod DELETE -Uri "https://www.googleapis.com/youtube/v3/videos?id=$($Video.id)"
 	}
 }
 
