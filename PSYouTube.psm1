@@ -3,13 +3,13 @@ function Request-AccessToken {
 	[OutputType('string')]
 	param
 	(
-		[Parameter(Mandatory)]
+		[Parameter()]
 		[Parameter(ParameterSetName = 'Refresh')]
 		[Parameter(ParameterSetName = 'NewToken')]
 		[ValidateNotNullOrEmpty()]
 		[string]$ClientId,
 
-		[Parameter(Mandatory)]
+		[Parameter()]
 		[Parameter(ParameterSetName = 'Refresh')]
 		[Parameter(ParameterSetName = 'NewToken')]
 		[ValidateNotNullOrEmpty()]
@@ -41,6 +41,13 @@ function Request-AccessToken {
 	
 	$ErrorActionPreference = 'Stop'
 	try {
+
+		if (-not $PSBoundParameters.ContainsKey('ClientId')) {
+			$ClientId = (Get-PSYouTubeApiAuthInfo).ClientId
+		}
+		if (-not $PSBoundParameters.ContainsKey('ClientSecret')) {
+			$ClientSecret = (Get-PSYouTubeApiAuthInfo).ClientSecret
+		}
 
 		$payload = @{
 			client_id    = [System.Uri]::EscapeUriString($ClientId)
@@ -97,7 +104,7 @@ function Request-AccessToken {
 	}
 }
 
-function Get-ApiAuthInfo {
+function Get-PSYouTubeApiAuthInfo {
 	[CmdletBinding()]
 	param
 	(
@@ -131,7 +138,7 @@ function Get-ApiAuthInfo {
 	}
 }
 
-function Save-ApiAuthInfo {
+function Save-PSYoutubeApiAuthInfo {
 	[CmdletBinding()]
 	param (
 		[Parameter()]
@@ -201,6 +208,10 @@ function Invoke-YouTubeApiCall {
 
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
+		[int]$StartIndex,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
 		[string]$HTTPMethod = 'GET',
 
 		[Parameter()]
@@ -232,12 +243,12 @@ function Invoke-YouTubeApiCall {
 	$apiPayload = @{}
 
 	$invRestParams.Headers = @{ 
-		'Authorization' = "Bearer $((Get-ApiAuthInfo).AccessToken)" 
+		'Authorization' = "Bearer $((Get-PSYouTubeApiAuthInfo).AccessToken)" 
 	}
 
 	if ($HTTPMethod -eq 'GET') {
 		$apiPayload.maxResults = 50
-		# $apiPayload.key = (Get-ApiAuthInfo).APIKey
+		# $apiPayload.key = (Get-PSYouTubeApiAuthInfo).APIKey
 		
 	} else {
 		$invRestParams.Headers += @{ 
@@ -248,6 +259,8 @@ function Invoke-YouTubeApiCall {
 
 	if ($PageToken) {
 		$body['pageToken'] = $PageToken
+	} elseif ($PSBoundParameters.ContainsKey('StartIndex')) {
+		$body['startIndex'] = $StartIndex
 	}
 	
 	if ($HTTPMethod -ne 'GET') {
@@ -265,13 +278,14 @@ function Invoke-YouTubeApiCall {
 	$invRestParams.Uri = $uri
 
 	try {
+		$foo=''
 		$result = Invoke-RestMethod @invRestParams
 	} catch {
 		if ($_.Exception.Message -like '*(401) Unauthorized*') {
 			## The token may be expired. Grab another one using the refresh token and try again
-			$apiCred = Get-ApiAuthInfo
+			$apiCred = Get-PSYouTubeApiAuthInfo
 			$tokens = Request-AccessToken -ClientId $apiCred.ClientId -ClientSecret $apiCred.ClientSecret -RefreshToken $apiCred.RefreshToken
-			$tokens | Save-ApiAuthInfo
+			$tokens | Save-PSYoutubeApiAuthInfo
 			$invParams = @{
 				Payload    = $Payload
 				HTTPMethod = $HTTPMethod
@@ -287,14 +301,16 @@ function Invoke-YouTubeApiCall {
 	}
 
 	if ('items' -in $result.PSObject.Properties.Name) {
-		$output = $result.items
+		$propertyName = 'items'
 	} else {
-		$output = $result
+		$propertyName = 'rows'
 	}
-	$output
+	$result.$propertyName
 
 	if ($result.PSObject.Properties.Name -contains 'nextPageToken') {
-		Invoke-YouTubeApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod
+		Invoke-YouTubeApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod -ApiName $ApiName
+	} elseif (-not $PSBoundParameters.ContainsKey('StartIndex')) {
+		$startIndex = $body.maxResults + 1
 	}
 }
 
@@ -427,7 +443,13 @@ function Get-VideoAnalytics {
 		dimensions = 'video'
 		metrics    = $Metric
 		sort       = "-$Metric"
-	}	
+	}
+
+	if ($PSBoundParameters.ContainsKey('Id')) {
+		$filters = @()
+		$Id.foreach({ $filters += "video==$($_)" })
+		$payload.filters = $filters -join '&'
+	}
 
 	if ($PSBoundParameters.ContainsKey('StartDate')) {
 		$payload.startDate = $StartDate.ToString('yyyy-MM-dd')
@@ -440,7 +462,7 @@ function Get-VideoAnalytics {
 		$payload.endDate = (Get-Date -Format 'yyyy-MM-dd')
 	}
 	
-	foreach ($vid in (Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'reports' -ApiName 'Analytics').rows) {
+	foreach ($vid in (Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'reports' -ApiName 'Analytics')) {
 		[pscustomobject]@{
 			'videoId' = $vid[0]
 			$Metric   = $vid[1]
