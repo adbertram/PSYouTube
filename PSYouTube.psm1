@@ -471,7 +471,7 @@ function Get-Video {
 	(
 		[Parameter(Mandatory)]
 		[ValidateNotNullOrEmpty()]
-		[string[]]$VideoId
+		[string[]]$Id
 	)
 
 	$ErrorActionPreference = 'Stop'
@@ -483,12 +483,12 @@ function Get-Video {
 	## Split out into groups no larger than 50. 50 is the max at one time
 	$i = 0
 	do {
-		$ids = $VideoId | Select-Object -First 50 -Skip $i
+		$ids = $Id | Select-Object -First 50 -Skip $i
 		$payload.id = $ids -join ','
 		Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'videos'
 		$i += 50
 		$processedIds += $ids
-	} while ($processedIds.Count -lt @($VideoId).Count)
+	} while ($processedIds.Count -lt @($Id).Count)
 }
 
 function ConvertTo-Timespan {
@@ -787,7 +787,7 @@ function Add-Tag {
 
 	process {
 		## Forced to pass the category ID so and the search API won't show it
-		$vid = Get-Video -VideoId $Video.videoId
+		$vid = Get-Video -Id $Video.videoId
 
 		## Ensure there are no dup tags to be set
 		$dedupedTags = $Tag | Select-Object -Unique
