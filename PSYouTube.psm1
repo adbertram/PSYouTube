@@ -453,11 +453,10 @@ function Invoke-YouTubeApiCall {
 	}
 
 	if ('items' -in $result.PSObject.Properties.Name) {
-		$propertyName = 'items'
+		$result.items
 	} else {
-		$propertyName = 'rows'
+		$result.rows
 	}
-	$result.$propertyName
 
 	if ($result.PSObject.Properties.Name -contains 'nextPageToken') {
 		Invoke-YouTubeApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod -ApiName $ApiName
@@ -617,10 +616,19 @@ function Get-VideoAnalytics {
 	$idGroups = ($Id | GroupEvenly -number ([math]::Ceiling($Id.count / 50)))
 	foreach ($idGroup in $idGroups) {
 		$payload.filters = 'video=={0}' -f ($idGroup -join ',')
-		foreach ($vid in (Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'reports' -ApiName 'Analytics')) {
+		$vids = Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'reports' -ApiName 'Analytics'
+		if (@($vids).Count -eq 2) {
+			$s = $vids -split ' '
 			[pscustomobject]@{
-				'videoId' = $vid[0]
-				$Metric   = $vid[1]
+				'videoId' = $s[0]
+				$Metric   = $s[1]
+			}
+		} else {
+			foreach ($vid in $vids) {
+				[pscustomobject]@{
+					'videoId' = $vid[0]
+					$Metric   = $vid[1]
+				}
 			}
 		}
 	}
