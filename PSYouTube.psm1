@@ -184,6 +184,165 @@ function Save-PSYoutubeApiAuthInfo {
 	}
 }
 
+function GroupEvenly {
+	<# 
+	.SYNOPSIS 
+		Evenly divides input objects into a given number of groups 
+		optionally weighted by the value of a given property. 
+
+	.DESCRIPTION 
+		Creates specified number of groups (arrays) 
+		Input object are sorted by value of the specified Property, descending 
+			(If no property is specified, .Count is used) 
+		Each object is placed in the group with the smallest totale value of the specified Property 
+
+		This algorithm may not always produce an optimal result, but does 
+		produce a reasonable result quickly compared to the brute force 
+		required to guarantee an optimal result. 
+
+	.OUTPUT 
+		[array[]] 
+
+	.PARAMETER InputObject 
+		Objects to be grouped 
+		Accepts pipeline input 
+		Unlike most commands, accepts Null pipeline input 
+
+	.PARAMETER Property 
+		String - Property to use to determine object size for weighted grouping 
+		Accepts nested property names, e.g. - Members.Count 
+		Default to "Count" 
+
+	.PARAMETER Number 
+		Int32 - Number of groups to create 
+		Defaults to 2 
+
+	.EXAMPLE 
+		$Users = Get-ADUser -Filter * 
+		$Teams = Group-Evenly -InputObject $Users 
+
+		Results in two arrays, each with half of the users. 
+
+	.EXAMPLE 
+		$DataChunks = Get-ChildItem C:\Temp -File | 
+			Group-Evenly -Property Length -Number 4 
+
+		Results in four arrays of files, grouped such that the total file sizes 
+		of the groups are approximately equal. 
+
+	.EXAMPLE 
+		$Meetings = Get-ADGroup -Filter { Name -like "Dept*" } -Properties Members | 
+			Group-Evenly -Property Members.Count -Number 6 
+
+		Results in six arrays of AD department groups, grouped such that the total 
+		membership of the grouping are approximately equal 
+
+	.EXAMPLE 
+		$Whatever = Get-ChildItem C:\Temp -File | 
+			GroupEvenly -Property Directory.Parent.FullName.Length 
+
+		Results in two arrays of files, grouped evenly but weighted by the length 
+		of the full path of the parent of the file's directory. That is, of course, 
+		completely useless, but I didn't feel like taking the time to come up with 
+		a better example of using a deeply nested property value. 
+
+	.NOTES 
+		v 1.0 Tim Curwick Created 
+	#>
+	[cmdletbinding()]
+	Param (
+		[parameter( ValueFromPipeline = $True )]
+		[array]$InputObject,
+		[string]$Property = 'Count',
+		[int]$Number = 2 )
+
+	Begin {
+		# Initialize array
+		$RawItems = @()
+	}
+	Process {
+		# If input is from pipeline
+		# Treat an array as a single input item
+		If ( $PSCmdlet.MyInvocation.ExpectingInput ) {
+			$RawItems += , $InputObject
+		}
+
+		# Else (input is from paramter)
+		# Treat an array as a collection of input items
+		Else {
+			$RawItems += $InputObject
+		}
+	}
+	End {
+		## Test for code injection
+
+		# Build property string
+		$SizeString = "`$_.$Property"
+
+		# Use PowerShell parser to tokensize the property string
+		$TokenErrors = [System.Collections.ObjectModel.Collection[System.Management.Automation.PSParseError]]@()
+		$Tokens = [System.Management.Automation.PSParser]::Tokenize( $SizeString, [ref]$TokenErrors )
+
+		# If there are errors, it won't work anyway; set to invalid
+		$PropertyValid = $TokenErrors.Count -eq 0
+
+		# If there are any tokens after the $_ other than .PropertyName.PropertyName.etc
+		# (Bad -Property value (or code injection))
+		# Set to invalid
+		$Tokens[2..($Tokens.Count-1)].
+		Where{
+			$_.Type -notin 'Operator', 'Member', 'NewLine' -or
+			( $_.Type -eq 'Operator' -and $_.Content -ne '.' ) }.
+		ForEach{ $PropertyValid = $False }
+		
+		# If property string is valid
+		# continue
+		If ( $PropertyValid ) {
+			# Initialize array with the desired number of groups
+			$Groups = , @() * $Number
+
+			# Initialize array to hold group sizes
+			$Sizes  = @(0) * $Number
+
+			# Get highest index number
+			$TopIndex = $Number - 1
+
+			# Convert size string to a scriptblock
+			$SizeBlock = [ScriptBlock]::Create( $SizeString )
+
+			# Create an array with the items and their calculated sizes
+			# Sort by size descending
+			$Items = $RawItems |
+				Select-Object -Property @(
+				@{ Label = 'Value'; Expression = { $_ } }
+				@{ Label = 'Size' ; Expression = $SizeBlock } ) |
+				Sort-Object -Property Size -Descending
+
+			# For each item (starting with the largest)
+			# Place item in smallest group
+			ForEach ( $Item in $Items ) {
+				# Find the index of the smallest group
+				$Smallest = 0..$TopIndex | Sort-Object -Property { $Sizes[$_] } | Select-Object -First 1
+
+				# Add the item to the smallest group
+				$Groups[$Smallest] += $Item.Value
+
+				# Add the size of the item to the group size
+				$Sizes[ $Smallest] += $Item.Size
+			}
+
+			# Return the results
+			return $Groups
+		}
+
+		# Else (invalid Property value)
+		# Throw error (respecting ErrorAction)
+		Else {
+			Write-Error -Message "Invalid Property value."
+		}
+	}
+}
+
 function Invoke-YouTubeApiCall {
 	## Must enable the YouTube Data API on the project you're querying in the Google Developers Console
 	[OutputType('pscustomobject')]
@@ -205,10 +364,6 @@ function Invoke-YouTubeApiCall {
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
 		[string]$PageToken,
-
-		[Parameter()]
-		[ValidateNotNullOrEmpty()]
-		[int]$StartIndex,
 
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
@@ -259,8 +414,6 @@ function Invoke-YouTubeApiCall {
 
 	if ($PageToken) {
 		$body['pageToken'] = $PageToken
-	} elseif ($PSBoundParameters.ContainsKey('StartIndex')) {
-		$body['startIndex'] = $StartIndex
 	}
 	
 	if ($HTTPMethod -ne 'GET') {
@@ -278,7 +431,6 @@ function Invoke-YouTubeApiCall {
 	$invRestParams.Uri = $uri
 
 	try {
-		$foo=''
 		$result = Invoke-RestMethod @invRestParams
 	} catch {
 		if ($_.Exception.Message -like '*(401) Unauthorized*') {
@@ -309,8 +461,6 @@ function Invoke-YouTubeApiCall {
 
 	if ($result.PSObject.Properties.Name -contains 'nextPageToken') {
 		Invoke-YouTubeApiCall -PageToken $result.nextPageToken -Payload $Payload -ApiMethod $ApiMethod -ApiName $ApiName
-	} elseif (-not $PSBoundParameters.ContainsKey('StartIndex')) {
-		$startIndex = $body.maxResults + 1
 	}
 }
 
@@ -416,41 +566,43 @@ function Get-VideoAnalytics {
 	[CmdletBinding(DefaultParameterSetName = 'Default')]
 	param
 	(
-		[Parameter(Mandatory, ParameterSetName = 'ByVideoId')]
+		[Parameter(Mandatory)]
 		[ValidateNotNullOrEmpty()]
-		[string[]]$Id,
+		[string]$ChannelId,
 
 		[Parameter(Mandatory)]
 		[ValidateNotNullOrEmpty()]
 		[ValidateSet('estimatedMinutesWatched')]
 		[string]$Metric,
 
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string[]]$Id,
+
 		[Parameter(Mandatory, ParameterSetName = 'ByTimeFrame')]
-		[Parameter(ParameterSetName = 'ByVideoId')]
 		[ValidateNotNullOrEmpty()]
 		[datetime]$StartDate,
 
-		[Parameter(Mandatory, ParameterSetName = 'ByTimeFrame')]
-		[Parameter(ParameterSetName = 'ByVideoId')]
+		[Parameter(ParameterSetName = 'ByTimeFrame')]
 		[ValidateNotNullOrEmpty()]
-		[datetime]$EndDate
+		[datetime]$EndDate,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[int]$StartIndex
 	)
 
 	$ErrorActionPreference = 'Stop'
 
 	$payload = @{
 		ids        = 'channel==MINE'
-		dimensions = 'video'
 		metrics    = $Metric
-		sort       = "-$Metric"
+		dimensions = 'video'
 	}
 
-	if ($PSBoundParameters.ContainsKey('Id')) {
-		$filters = @()
-		$Id.foreach({ $filters += "video==$($_)" })
-		$payload.filters = $filters -join '&'
+	if (-not $PSBoundParameters.ContainsKey('Id')) {
+		$Id = (Get-ChannelVideo -ChannelId $ChannelId).id.videoId
 	}
-
 	if ($PSBoundParameters.ContainsKey('StartDate')) {
 		$payload.startDate = $StartDate.ToString('yyyy-MM-dd')
 	} else {
@@ -461,11 +613,15 @@ function Get-VideoAnalytics {
 	} else {
 		$payload.endDate = (Get-Date -Format 'yyyy-MM-dd')
 	}
-	
-	foreach ($vid in (Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'reports' -ApiName 'Analytics')) {
-		[pscustomobject]@{
-			'videoId' = $vid[0]
-			$Metric   = $vid[1]
+
+	$idGroups = ($Id | GroupEvenly -number ([math]::Ceiling($Id.count / 50)))
+	foreach ($idGroup in $idGroups) {
+		$payload.filters = 'video=={0}' -f ($idGroup -join ',')
+		foreach ($vid in (Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'reports' -ApiName 'Analytics')) {
+			[pscustomobject]@{
+				'videoId' = $vid[0]
+				$Metric   = $vid[1]
+			}
 		}
 	}
 }
