@@ -36,7 +36,7 @@ function Request-AccessToken {
 		[ValidateNotNullOrEmpty()]
 		[Parameter(ParameterSetName = 'Refresh')]
 		[Parameter(ParameterSetName = 'NewToken')]
-		[string]$ApplicationName = 'PSYouTube'
+		[string]$ApplicationName = 'PSYouTube PowerShell Module'
 	)
 	
 	$ErrorActionPreference = 'Stop'
@@ -402,10 +402,8 @@ function Invoke-YouTubeApiCall {
 	}
 
 	if ($HTTPMethod -eq 'GET') {
-		$apiPayload.maxResults = 50
-		# $apiPayload.key = (Get-PSYouTubeApiAuthInfo).APIKey
-		
-	} else {
+		$apiPayload.maxResults = 50	
+	} elseif ($PSBoundParameters.ContainsKey('Payload')) {
 		$invRestParams.Headers += @{ 
 			'Content-Type' = 'application/json'
 		}
@@ -425,8 +423,15 @@ function Invoke-YouTubeApiCall {
 		$body = $body | ConvertTo-Json -Depth 5
 	}
 
-	if ($HTTPMethod -ne 'DELETE') {
-		$invRestParams.Body = $body
+	$invRestParams.Body = $body
+
+	if ($PSBoundParameters.ContainsKey('Parameters')) {
+		$vals = @()
+		foreach ($param in $Parameters.GetEnumerator()) {
+			$vals += "$($param.Key)=$($param.Value)"
+		}
+		$queryString = $vals -join '&'
+		$uri = "{0}?{1}" -f $uri,$queryString
 	}
 	$invRestParams.Uri = $uri
 
@@ -698,6 +703,10 @@ function Update-Video {
 
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
+		[bool]$EmbeddingAllowed,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
 		[string]$Name,
 
 		[Parameter()]
@@ -723,6 +732,9 @@ function Update-Video {
 		if ($PSBoundParameters.ContainsKey('PrivacyStatus')) {
 			$Video.snippet.privacyStatus = $PrivacyStatus
 		}
+		if ($PSBoundParameters.ContainsKey('EmbeddingAllowed')) {
+			$Video.status.embeddable = $EmbeddingAllowed
+		}
 		if ($PSBoundParameters.ContainsKey('Name')) {
 			$Video.snippet.title = $Name
 		}
@@ -739,6 +751,7 @@ function Update-Video {
 				}
 				status  = @{
 					privacyStatus = $Video.status.privacyStatus
+					embeddable    = $Video.status.embeddable
 				}
 			}
 			$null = Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod PUT
@@ -763,7 +776,10 @@ function Remove-Video {
 	}
 
 	process {
-		$null = Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'videos' -HTTPMethod DELETE -Uri "https://www.googleapis.com/youtube/v3/videos?id=$($Video.id)"
+		$params = @{
+			id = $Video.videoId
+		}
+		$null = Invoke-YouTubeApiCall -Parameters $params -ApiMethod 'videos' -HTTPMethod DELETE
 	}
 }
 
