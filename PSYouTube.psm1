@@ -110,6 +110,26 @@ function Get-PSYouTubeApiAuthInfo {
 	(
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
+		[string]$RefreshToken,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$AccessToken,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$ClientId,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$ClientSecret,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[string]$ApiKey,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
 		[string]$RegistryKeyPath = 'HKCU:\Software\PSYouTube'
 	)
 	
@@ -123,18 +143,36 @@ function Get-PSYouTubeApiAuthInfo {
 	}
 
 	try {
-		if (-not (Test-Path -Path $RegistryKeyPath)) {
-			Write-Warning 'No PSYouTube API info found in registry'
-		} else {
-			$keys = (Get-Item -Path $RegistryKeyPath).Property
-			$ht = @{}
-			foreach ($key in $keys) {
-				$ht[$key] = decrypt (Get-ItemProperty -Path $RegistryKeyPath).$key
+		$PSYouTubeApiInfo = @{}
+		
+		'RefreshToken', 'AccessToken', 'ClientId', 'ClientSecret', 'ApiKey' | ForEach-Object {
+			if ($PSBoundParameters.ContainsKey($_)) {
+				$PSYouTubeApiInfo.$_ = (Get-Variable -Name $_).Value
 			}
-			[pscustomobject]$ht
+		}
+
+		if ($PSYouTubeApiInfo.Keys.Count -ne 5) {
+			if (Get-Variable -Name PSYouTubeApiInfo -Scope Script -ErrorAction 'Ignore') {
+				$script:PSYouTubeApiInfo
+			} elseif (-not (Test-Path -Path $RegistryKeyPath)) {
+				throw "No PSYouTube API info found in registry!"
+			} elseif (-not ($keyValues = Get-ItemProperty -Path $RegistryKeyPath)) {
+				throw 'PSYouTube API info not found in registry!'
+			} else {
+				'RefreshToken', 'AccessToken', 'ClientId', 'ClientSecret', 'ApiKey' | ForEach-Object {
+					$decryptedVal = decrypt $keyValues.$_
+					$PSYouTubeApiInfo.$_ = $decryptedVal
+				}
+				$script:PSYouTubeApiInfo = [pscustomobject]$PSYouTubeApiInfo
+				$script:PSYouTubeApiInfo
+			}
+			
+		} else {
+			$script:PSYouTubeApiInfo = [pscustomobject]$PSYouTubeApiInfo
+			$script:PSYouTubeApiInfo
 		}
 	} catch {
-		Write-Error $_.Exception.Message
+		$PSCmdlet.ThrowTerminatingError($_)
 	}
 }
 
@@ -431,7 +469,7 @@ function Invoke-YouTubeApiCall {
 			$vals += "$($param.Key)=$($param.Value)"
 		}
 		$queryString = $vals -join '&'
-		$uri = "{0}?{1}" -f $uri,$queryString
+		$uri = "{0}?{1}" -f $uri, $queryString
 	}
 	$invRestParams.Uri = $uri
 
@@ -533,13 +571,8 @@ function Get-ChannelVideo {
 
 	$payload = @{
 		part    = 'snippet'
-		# channelId = $ChannelId ## this restrict the total videos displayed to 500
 		type    = 'video'
 		forMine = 'true'
-		## These may have to be done once the channel gets over 500. Not sure.
-		# order           = 'date'
-		# publishedAfter  = '2018-10-01T00:00:00Z'
-		# publishedBefore = '2018-10-10T00:00:00Z'
 	}
 
 	Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'search'
