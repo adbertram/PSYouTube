@@ -809,8 +809,15 @@ function Remove-Video {
 	}
 
 	process {
+		if ('id' -in $Video.PSObject.Properties.Name) {
+			$id = $Video.id	
+		} elseif ('videoId' -in $Video.PSObject.Properties.Name) {
+			$id = $Video.videoId
+		} else {
+			throw 'Could not find YouTube video ID!'
+		}
 		$params = @{
-			id = $Video.videoId
+			id = $id
 		}
 		$null = Invoke-YouTubeApiCall -Parameters $params -ApiMethod 'videos' -HTTPMethod DELETE
 	}
