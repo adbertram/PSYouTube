@@ -143,7 +143,7 @@ function Get-PSYouTubeApiAuthInfo {
 	}
 
 	try {
-		$PSYouTubeApiInfo = @{}
+		$PSYouTubeApiInfo = @{ }
 		
 		'RefreshToken', 'AccessToken', 'ClientId', 'ClientSecret', 'ApiKey' | ForEach-Object {
 			if ($PSBoundParameters.ContainsKey($_)) {
@@ -213,7 +213,7 @@ function Save-PSYoutubeApiAuthInfo {
 			New-Item -Path ($RegistryKeyPath | Split-Path -Parent) -Name ($RegistryKeyPath | Split-Path -Leaf) | Out-Null
 		}
 		
-		$values = $PSBoundParameters.GetEnumerator().where({ $_.Key -ne 'RegistryKeyPath' -and $_.Value}) | Select-Object -ExpandProperty Key
+		$values = $PSBoundParameters.GetEnumerator().where({ $_.Key -ne 'RegistryKeyPath' -and $_.Value }) | Select-Object -ExpandProperty Key
 		
 		foreach ($val in $values) {
 			Write-Verbose "Creating $RegistryKeyPath\$val"
@@ -351,10 +351,10 @@ function GroupEvenly {
 			# Create an array with the items and their calculated sizes
 			# Sort by size descending
 			$Items = $RawItems |
-				Select-Object -Property @(
+			Select-Object -Property @(
 				@{ Label = 'Value'; Expression = { $_ } }
 				@{ Label = 'Size' ; Expression = $SizeBlock } ) |
-				Sort-Object -Property Size -Descending
+			Sort-Object -Property Size -Descending
 
 			# For each item (starting with the largest)
 			# Place item in smallest group
@@ -410,7 +410,15 @@ function Invoke-YouTubeApiCall {
 		[Parameter()]
 		[ValidateNotNullOrEmpty()]
 		[ValidateSet('Data', 'Analytics')]
-		[string]$ApiName = 'Data'
+		[string]$ApiName = 'Data',
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[int]$MaxRetries = 5,
+
+		[Parameter()]
+		[ValidateNotNullOrEmpty()]
+		[switch]$IsRetryAttempt
 	)
 
 	$ErrorActionPreference = 'Stop'
@@ -433,7 +441,7 @@ function Invoke-YouTubeApiCall {
 		Method      = $HTTPMethod
 		ErrorAction = 'Stop'
 	}
-	$apiPayload = @{}
+	$apiPayload = @{ }
 
 	$invRestParams.Headers = @{ 
 		'Authorization' = "Bearer $((Get-PSYouTubeApiAuthInfo).AccessToken)" 
@@ -474,6 +482,14 @@ function Invoke-YouTubeApiCall {
 	$invRestParams.Uri = $uri
 
 	try {
+		if ($IsRetryAttempt.IsPresent) {
+			$retryAttempts++
+			if ($retryAttempts -eq $MaxRetries) {
+				throw 'Max API retries met.'
+			}
+		} else {
+			$retryAttempts = 0
+		}
 		$result = Invoke-RestMethod @invRestParams
 	} catch {
 		if ($_.Exception.Message -like '*(401) Unauthorized*') {
@@ -482,9 +498,10 @@ function Invoke-YouTubeApiCall {
 			$tokens = Request-AccessToken -ClientId $apiCred.ClientId -ClientSecret $apiCred.ClientSecret -RefreshToken $apiCred.RefreshToken
 			$tokens | Save-PSYoutubeApiAuthInfo
 			$invParams = @{
-				Payload    = $Payload
-				HTTPMethod = $HTTPMethod
-				ApiMethod  = $ApiMethod
+				IsRetryAttempt = $true
+				Payload        = $Payload
+				HTTPMethod     = $HTTPMethod
+				ApiMethod      = $ApiMethod
 			}
 			if ($PageToken) {
 				$invParams.PageToken = $PageToken
@@ -574,7 +591,7 @@ function Get-ChannelVideo {
 		type    = 'video'
 		forMine = 'true'
 	}
-
+	Write-Verbose -Message "Finding channel videos for channel ID [$($ChannelId)]..."
 	Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'search'
 }
 
@@ -654,6 +671,7 @@ function Get-VideoAnalytics {
 	$idGroups = ($Id | GroupEvenly -number ([math]::Ceiling($Id.count / 50)))
 	foreach ($idGroup in $idGroups) {
 		$payload.filters = 'video=={0}' -f ($idGroup -join ',')
+		Write-Verbose -Message "Getting video analytics for video IDs [$(($idGroup -join ','))]..."
 		$vids = Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'reports' -ApiName 'Analytics'
 		if (@($vids).Count -eq 2) {
 			$s = $vids -split ' '
