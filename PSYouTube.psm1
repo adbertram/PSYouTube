@@ -1,107 +1,112 @@
 function Request-AccessToken {
-	[CmdletBinding()]
-	[OutputType('string')]
-	param
-	(
-		[Parameter()]
-		[Parameter(ParameterSetName = 'Refresh')]
-		[Parameter(ParameterSetName = 'NewToken')]
-		[ValidateNotNullOrEmpty()]
-		[string]$ClientId,
+    [CmdletBinding()]
+    [OutputType('string')]
+    param
+    (
+        [Parameter(ParameterSetName = 'Refresh')]
+        [Parameter(ParameterSetName = 'NewToken')]
+        [ValidateNotNullOrEmpty()]
+        [string]$ClientId,
 
-		[Parameter()]
-		[Parameter(ParameterSetName = 'Refresh')]
-		[Parameter(ParameterSetName = 'NewToken')]
-		[ValidateNotNullOrEmpty()]
-		[string]$ClientSecret,
+        [Parameter(ParameterSetName = 'Refresh')]
+        [Parameter(ParameterSetName = 'NewToken')]
+        [ValidateNotNullOrEmpty()]
+        [string]$ClientSecret,
+        
+        [Parameter(ParameterSetName = 'Refresh')]
+        [ValidateNotNullOrEmpty()]
+        [string]$Prompt = 'consent',
 
-		[Parameter(Mandatory, ParameterSetName = 'Refresh')]
-		[ValidateNotNullOrEmpty()]
-		[string]$RefreshToken,
+        [Parameter(Mandatory, ParameterSetName = 'Refresh')]
+        [ValidateNotNullOrEmpty()]
+        [string]$RefreshToken,
 		
-		[Parameter(ParameterSetName = 'NewToken')]
-		[ValidateNotNullOrEmpty()]
-		[string[]]$Scope = 'youtube',
+        [Parameter(ParameterSetName = 'NewToken')]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$Scope = 'youtube',
 
-		[Parameter(ParameterSetName = 'NewToken')]
-		[ValidateNotNullOrEmpty()]
-		[ValidateSet('online', 'offline')]
-		[string]$AccessType = 'offline',
+        [Parameter(ParameterSetName = 'NewToken')]
+        [Parameter(ParameterSetName = 'RefreshToken')]
+        [ValidateNotNullOrEmpty()]
+        [ValidateSet('online', 'offline')]
+        [string]$AccessType = 'offline',
 
-		[Parameter(ParameterSetName = 'NewToken')]
-		[ValidateSet('code', 'token')]
-		[string]$ResponseType = 'code',
+        [Parameter(ParameterSetName = 'NewToken')]
+        [ValidateSet('code', 'token')]
+        [string]$ResponseType = 'code',
 	
-		[Parameter()]
-		[ValidateNotNullOrEmpty()]
-		[Parameter(ParameterSetName = 'Refresh')]
-		[Parameter(ParameterSetName = 'NewToken')]
-		[string]$ApplicationName = 'PSYouTube PowerShell Module'
-	)
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [Parameter(ParameterSetName = 'Refresh')]
+        [Parameter(ParameterSetName = 'NewToken')]
+        [string]$ApplicationName = 'PSYouTube PowerShell Module'
+    )
 	
-	$ErrorActionPreference = 'Stop'
-	try {
+    $ErrorActionPreference = 'Stop'
+    try {
 
-		if (-not $PSBoundParameters.ContainsKey('ClientId')) {
-			$ClientId = (Get-PSYouTubeApiAuthInfo).ClientId
-		}
-		if (-not $PSBoundParameters.ContainsKey('ClientSecret')) {
-			$ClientSecret = (Get-PSYouTubeApiAuthInfo).ClientSecret
-		}
+        if (-not $PSBoundParameters.ContainsKey('ClientId')) {
+            $ClientId = (Get-PSYouTubeApiAuthInfo).ClientId
+        }
+        if (-not $PSBoundParameters.ContainsKey('ClientSecret')) {
+            $ClientSecret = (Get-PSYouTubeApiAuthInfo).ClientSecret
+        }
 
-		$payload = @{
-			client_id    = [System.Uri]::EscapeUriString($ClientId)
-			redirect_uri = [System.Uri]::EscapeUriString("urn:ietf:wg:oauth:2.0:oob")
-		}
+        $payload = @{
+            client_id    = [System.Uri]::EscapeUriString($ClientId)
+            redirect_uri = [System.Uri]::EscapeUriString("urn:ietf:wg:oauth:2.0:oob")
+        }
 
-		if ($PSCmdlet.ParameterSetName -eq 'NewToken') {
-			$endpointCodeUri = 'https://accounts.google.com/o/oauth2/v2/auth'
+        if ($PSCmdlet.ParameterSetName -eq 'NewToken') {
+            $endpointCodeUri = 'https://accounts.google.com/o/oauth2/v2/auth'
 		
-			$scopes = @()
-			foreach ($s in $Scope) {
-				$scopes += "https://www.googleapis.com/auth/$s"
-			}
-			$payload += @{
-				'scope'                  = [System.Uri]::EscapeUriString($scopes -join ',')
-				'access_type'            = $AccessType
-				'include_granted_scopes' = 'true'
-				'response_type'          = 'code'
-				'state'                  = 'ps_state'
-			}
+            $scopes = @()
+            foreach ($s in $Scope) {
+                $scopes += "https://www.googleapis.com/auth/$s"
+            }
+            $payload += @{
+                'scope'                  = [System.Uri]::EscapeUriString($scopes -join ',')
+                'access_type'            = $AccessType
+                'include_granted_scopes' = 'true'
+                'response_type'          = 'code'
+                'state'                  = 'ps_state'
+            }
 
-			$keyValues = @()
-			$payload.GetEnumerator() | sort Name | foreach {
-				$keyValues += "$($_.Key)=$($_.Value)"
-			}
+            $keyValues = @()
+            $payload.GetEnumerator() | sort Name | foreach {
+                $keyValues += "$($_.Key)=$($_.Value)"
+            }
 		
-			$keyValueString = $keyValues -join '&'
-			$authUri = '{0}?{1}' -f $endpointCodeUri, $keyValueString
+            $keyValueString = $keyValues -join '&'
+            $authUri = '{0}?{1}' -f $endpointCodeUri, $keyValueString
 		
-			& start $authUri
+            & start $authUri
 		
-			$code = Read-Host -Prompt 'Please enter the authorization code displayed in your web browser'
+            $code = Read-Host -Prompt 'Please enter the authorization code displayed in your web browser'
 
-			$payload += @{
-				code          = [System.Uri]::EscapeUriString($code)
-				grant_type    = 'authorization_code'
-				client_secret = [System.Uri]::EscapeUriString($ClientSecret)
-			}
-		} elseif ($PSCmdlet.ParameterSetName -eq 'Refresh') {
-			$payload += @{
-				'refresh_token' = $RefreshToken
-				'grant_type'    = 'refresh_token'
-				client_secret   = [System.Uri]::EscapeUriString($ClientSecret)
-			}
-		}
+            $payload += @{
+                code          = [System.Uri]::EscapeUriString($code)
+                grant_type    = 'authorization_code'
+                client_secret = [System.Uri]::EscapeUriString($ClientSecret)
+            }
+        } elseif ($PSCmdlet.ParameterSetName -eq 'Refresh') {
+            $payload += @{
+                'refresh_token' = $RefreshToken
+                'grant_type'    = 'refresh_token'
+                'prompt'        = $Prompt
+                'access_type'   = $AccessType
+                client_secret   = [System.Uri]::EscapeUriString($ClientSecret)
+            }
+        }
 
-		$endpointTokenUri = 'https://www.googleapis.com/oauth2/v4/token'
-		$response = Invoke-WebRequest -Uri $endpointTokenUri -Method POST -Body $payload
+        $endpointTokenUri = 'https://www.googleapis.com/oauth2/v4/token'
+        $response = Invoke-WebRequest -Uri $endpointTokenUri -Method POST -Body $payload
 
-		ConvertFrom-Json -InputObject $response.Content | Select-Object -Property access_token, refresh_token
+        ConvertFrom-Json -InputObject $response.Content | Select-Object -Property access_token, refresh_token
 		
-	} catch {
-		Write-Error $_.Exception.Message
-	}
+    } catch {
+        Write-Error $_.Exception.Message
+    }
 }
 
 function Get-PSYouTubeApiAuthInfo {
@@ -492,24 +497,34 @@ function Invoke-YouTubeApiCall {
 		}
 		$result = Invoke-RestMethod @invRestParams
 	} catch {
-		if ($_.Exception.Message -like '*(401) Unauthorized*') {
-			## The token may be expired. Grab another one using the refresh token and try again
-			$apiCred = Get-PSYouTubeApiAuthInfo
-			$tokens = Request-AccessToken -ClientId $apiCred.ClientId -ClientSecret $apiCred.ClientSecret -RefreshToken $apiCred.RefreshToken
-			$tokens | Save-PSYoutubeApiAuthInfo
-			$invParams = @{
-				IsRetryAttempt = $true
-				Payload        = $Payload
-				HTTPMethod     = $HTTPMethod
-				ApiMethod      = $ApiMethod
-			}
-			if ($PageToken) {
-				$invParams.PageToken = $PageToken
-			}
-			Invoke-YouTubeApiCall @invParams
-		} else {
-			$PSCmdlet.ThrowTerminatingError($_)
-		}
+        if ($_.Exception.Message -like '*(401) Unauthorized*') {
+            ## The token may be expired. Grab another one using the refresh token and try again
+            $apiCred = Get-PSYouTubeApiAuthInfo
+            
+            $reqParams = @{
+                ClientId = $apiCred.ClientId
+                ClientSecret = $apiCred.ClientSecret
+                RefreshToken = $apiCred.RefreshToken
+                AccessType = 'offline'
+                
+            }
+
+            prompt=consent
+            $tokens = Request-AccessToken @reqParams
+            $tokens | Save-PSYoutubeApiAuthInfo
+            $invParams = @{
+                IsRetryAttempt = $true
+                Payload        = $Payload
+                HTTPMethod     = $HTTPMethod
+                ApiMethod      = $ApiMethod
+            }
+            if ($PageToken) {
+                $invParams.PageToken = $PageToken
+            }
+            Invoke-YouTubeApiCall @invParams
+        } else {
+            $PSCmdlet.ThrowTerminatingError($_)
+        }
 	}
 
 	if ('items' -in $result.PSObject.Properties.Name) {
@@ -577,11 +592,7 @@ function Get-ChannelVideo {
 	[OutputType('pscustomobject')]
 	[CmdletBinding()]
 	param
-	(
-		[Parameter(Mandatory)]
-		[ValidateNotNullOrEmpty()]
-		[string]$ChannelId
-	)
+	()
 
 	## NOTE: The API can sometimes take awhile to show newly published videos
 	$ErrorActionPreference = 'Stop'
@@ -591,7 +602,6 @@ function Get-ChannelVideo {
 		type    = 'video'
 		forMine = 'true'
 	}
-	Write-Verbose -Message "Finding channel videos for channel ID [$($ChannelId)]..."
 	Invoke-YouTubeApiCall -Payload $payload -ApiMethod 'search'
 }
 
@@ -655,7 +665,7 @@ function Get-VideoAnalytics {
 	}
 
 	if (-not $PSBoundParameters.ContainsKey('Id')) {
-		$Id = (Get-ChannelVideo -ChannelId $ChannelId).id.videoId
+		$Id = (Get-ChannelVideo).id.videoId
 	}
 	if ($PSBoundParameters.ContainsKey('StartDate')) {
 		$payload.startDate = $StartDate.ToString('yyyy-MM-dd')
