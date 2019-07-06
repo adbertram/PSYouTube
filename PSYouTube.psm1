@@ -423,6 +423,8 @@ function Invoke-YouTubeApiCall {
                 $invParams.PageToken = $PageToken
             }
             Invoke-YouTubeApiCall @invParams
+        } elseif ($_.Exception.Message -like '*(403) Forbidden*') {
+            throw 'Exceeded API quota'
         } else {
             $PSCmdlet.ThrowTerminatingError($_)
         }
@@ -706,7 +708,7 @@ function Update-Video {
                 id      = $Video.id
                 kind    = $Video.kind
                 snippet = @{
-                    title       = $Video.snippet.title -replace '\\', '\\'
+                    title       = $Video.snippet.title
                     categoryId  = $Video.snippet.categoryId
                     description = $Video.snippet.description
                     tags        = $Video.snippet.tags
