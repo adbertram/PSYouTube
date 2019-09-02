@@ -400,7 +400,8 @@ function Invoke-YouTubeApiCall {
         }
         $result = Invoke-RestMethod @invRestParams
     } catch {
-        if ($_.Exception.Message -like '*(401) Unauthorized*') {
+        if ($_.Exception.Message -like '*Unauthorized*') {
+            Write-Warning -Message "YouTube API returned 401 Unauthorized.."
             ## The token may be expired. Grab another one using the refresh token and try again
             $apiCred = Get-PSYouTubeApiAuthInfo
             
