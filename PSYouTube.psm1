@@ -413,7 +413,7 @@ function Invoke-YouTubeApiCall {
             }
 
             $tokens = Request-AccessToken @reqParams
-            $tokens | Save-PSYoutubeApiAuthInfo
+            Save-PSYoutubeApiAuthInfo -AccessToken $tokens.access_token -RefreshToken $tokens.refresh_token
             $invParams = @{
                 IsRetryAttempt = $true
                 Payload        = $Payload
