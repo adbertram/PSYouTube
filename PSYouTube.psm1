@@ -1,5 +1,5 @@
 function Request-AccessToken {
-    [CmdletBinding(DefaultParameterSetName = 'Default')]
+    [CmdletBinding(DefaultParameterSetName = 'NewToken')]
     [OutputType('string')]
     param
     (
@@ -30,22 +30,17 @@ function Request-AccessToken {
 
         [Parameter(ParameterSetName = 'NewToken')]
         [ValidateSet('code', 'token')]
-        [string]$ResponseType = 'code',
-	
-        [Parameter(ParameterSetName = 'Refresh')]
-        [Parameter(ParameterSetName = 'NewToken')]
-        [ValidateNotNullOrEmpty()]
-        [string]$ApplicationName = 'PSYouTube PowerShell Module'
+        [string]$ResponseType = 'code'
     )
 	
     $ErrorActionPreference = 'Stop'
     try {
 
         if (-not $PSBoundParameters.ContainsKey('ClientId')) {
-            $ClientId = (Get-PSYouTubeApiAuthInfo).ClientId
+            $ClientId = (Get-PSYouTubeConfiguration -Decrypt).ClientId
         }
         if (-not $PSBoundParameters.ContainsKey('ClientSecret')) {
-            $ClientSecret = (Get-PSYouTubeApiAuthInfo).ClientSecret
+            $ClientSecret = (Get-PSYouTubeConfiguration -Decrypt).ClientSecret
         }
 
         $payload = @{
@@ -69,16 +64,14 @@ function Request-AccessToken {
             }
 
             $keyValues = @()
-            $payload.GetEnumerator() | sort Name | foreach {
+            $payload.GetEnumerator() | Sort-Object Name | foreach {
                 $keyValues += "$($_.Key)=$($_.Value)"
             }
 		
             $keyValueString = $keyValues -join '&'
             $authUri = '{0}?{1}' -f $endpointCodeUri, $keyValueString
 		
-            & start $authUri
-		
-            $code = Read-Host -Prompt 'Please enter the authorization code displayed in your web browser'
+            $code = Read-Host -Prompt "Navigate to $authUri in your browser, allow access and paste the authorization code displayed here."
 
             $payload += @{
                 code          = [System.Uri]::EscapeUriString($code)
@@ -105,7 +98,7 @@ function Request-AccessToken {
     }
 }
 
-function Get-PSYouTubeApiAuthInfo {
+function Get-PSYouTubeConfiguration {
     [CmdletBinding()]
     param
     (
@@ -131,53 +124,45 @@ function Get-PSYouTubeApiAuthInfo {
 
         [Parameter()]
         [ValidateNotNullOrEmpty()]
-        [string]$RegistryKeyPath = 'HKCU:\Software\PSYouTube'
+        [switch]$Decrypt
     )
-	
+
     $ErrorActionPreference = 'Stop'
 
-    function decrypt([string]$TextToDecrypt) {
-        $secure = ConvertTo-SecureString $TextToDecrypt
-        $hook = New-Object system.Management.Automation.PSCredential("test", $secure)
-        $plain = $hook.GetNetworkCredential().Password
-        return $plain
-    }
-
     try {
-        $PSYouTubeApiInfo = @{ }
-		
-        'RefreshToken', 'AccessToken', 'ClientId', 'ClientSecret', 'ApiKey' | ForEach-Object {
-            if ($PSBoundParameters.ContainsKey($_)) {
-                $PSYouTubeApiInfo.$_ = (Get-Variable -Name $_).Value
-            }
+        function decrypt([string]$TextToDecrypt) {
+            $secure = ConvertTo-SecureString $TextToDecrypt
+            $hook = New-Object system.Management.Automation.PSCredential("test", $secure)
+            $plain = $hook.GetNetworkCredential().Password
+            return $plain
+        }
+    
+        $configJsonPath = "$PSScriptRoot\Configuration.json"
+        if (-not (Test-Path -Path $configJsonPath)) {
+            throw 'The required Configuration.json file could not be found.'
         }
 
-        if ($PSYouTubeApiInfo.Keys.Count -ne 5) {
-            if (Get-Variable -Name PSYouTubeApiInfo -Scope Script -ErrorAction 'Ignore') {
-                $script:PSYouTubeApiInfo
-            } elseif (-not (Test-Path -Path $RegistryKeyPath)) {
-                throw "No PSYouTube API info found in registry!"
-            } elseif (-not ($keyValues = Get-ItemProperty -Path $RegistryKeyPath)) {
-                throw 'PSYouTube API info not found in registry!'
-            } else {
-                'RefreshToken', 'AccessToken', 'ClientId', 'ClientSecret', 'ApiKey' | ForEach-Object {
-                    $decryptedVal = decrypt $keyValues.$_
-                    $PSYouTubeApiInfo.$_ = $decryptedVal
+        $encconfig = Get-Content -Path $configJsonPath -Raw | ConvertFrom-Json -AsHashtable
+        $decconfig = @{ }
+        $encconfig.Keys | ForEach-Object {
+            if ($encconfig[$_]) {
+                if ($Decrypt.IsPresent) {
+                    $decconfig.$_ = decrypt $encconfig[$_]
+                } else {
+                    $decconfig.$_ = $encconfig[$_]
                 }
-                $script:PSYouTubeApiInfo = [pscustomobject]$PSYouTubeApiInfo
-                $script:PSYouTubeApiInfo
+            } else {
+                $decconfig.$_ = ''
             }
-			
-        } else {
-            $script:PSYouTubeApiInfo = [pscustomobject]$PSYouTubeApiInfo
-            $script:PSYouTubeApiInfo
         }
+        $script:PSYouTubeConfiguration = [pscustomobject]$decconfig
+        [pscustomobject]$decconfig
     } catch {
         $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 
-function Save-PSYoutubeApiAuthInfo {
+function Save-PSYouTubeConfiguration {
     [CmdletBinding()]
     param (
         [Parameter()]
@@ -195,10 +180,7 @@ function Save-PSYoutubeApiAuthInfo {
         [string]$RefreshToken,
 
         [Parameter()]
-        [string]$APIKey,
-	
-        [Parameter()]
-        [string]$RegistryKeyPath = "HKCU:\Software\PSYouTube"
+        [string]$APIKey
     )
 
     begin {
@@ -209,17 +191,14 @@ function Save-PSYoutubeApiAuthInfo {
         }
     }
 	
-    process {
-        if (-not (Test-Path -Path $RegistryKeyPath)) {
-            New-Item -Path ($RegistryKeyPath | Split-Path -Parent) -Name ($RegistryKeyPath | Split-Path -Leaf) | Out-Null
-        }
+    process {		
+        $values = $PSBoundParameters.GetEnumerator().where({ $_.Value })
 		
-        $values = $PSBoundParameters.GetEnumerator().where({ $_.Key -ne 'RegistryKeyPath' -and $_.Value }) | Select-Object -ExpandProperty Key
-		
+        $config = Get-PSYouTubeConfiguration
         foreach ($val in $values) {
-            Write-Verbose "Creating $RegistryKeyPath\$val"
-            New-ItemProperty $RegistryKeyPath -Name $val -Value $(encrypt $((Get-Variable $val).Value)) -Force | Out-Null
+            $config | Add-Member -NotePropertyName $val.Key -NotePropertyValue (encrypt $val.Value) -Force
         }
+        $config | ConvertTo-Json | Set-Content -Path "$PSScriptRoot\configuration.json"
     }
 }
 
@@ -352,7 +331,7 @@ function Invoke-YouTubeApiCall {
     $apiPayload = @{ }
 
     $invRestParams.Headers = @{ 
-        'Authorization' = "Bearer $((Get-PSYouTubeApiAuthInfo).AccessToken)" 
+        'Authorization' = "Bearer $((Get-PSYouTubeConfiguration -Decrypt).AccessToken)" 
     }
 
     if ($HTTPMethod -eq 'GET') {
@@ -403,7 +382,7 @@ function Invoke-YouTubeApiCall {
         if ($_.Exception.Message -like '*Unauthorized*') {
             Write-Warning -Message "YouTube API returned 401 Unauthorized.."
             ## The token may be expired. Grab another one using the refresh token and try again
-            $apiCred = Get-PSYouTubeApiAuthInfo
+            $apiCred = Get-PSYouTubeConfiguration -Decrypt
             
             $reqParams = @{
                 ClientId     = $apiCred.ClientId
@@ -413,7 +392,7 @@ function Invoke-YouTubeApiCall {
             }
 
             $tokens = Request-AccessToken @reqParams
-            Save-PSYoutubeApiAuthInfo -AccessToken $tokens.access_token -RefreshToken $tokens.refresh_token
+            Save-PSYouTubeConfiguration -AccessToken $tokens.access_token -RefreshToken $tokens.refresh_token
             $invParams = @{
                 IsRetryAttempt = $true
                 Payload        = $Payload
