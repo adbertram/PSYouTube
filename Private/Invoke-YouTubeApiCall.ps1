@@ -110,19 +110,10 @@ function Invoke-YouTubeApiCall {
         $result = Invoke-RestMethod @invRestParams
     } catch {
         if ($_.Exception.Message -like '*Unauthorized*') {
-            Write-Warning -Message "YouTube API returned 401 Unauthorized.."
+            Write-Warning -Message "YouTube API returned 401 Unauthorized. Attempting to get refresh token..."
             ## The token may be expired. Grab another one using the refresh token and try again
-            $apiCred = Get-PSYouTubeConfiguration -Decrypt
-            
-            $reqParams = @{
-                ClientId     = $apiCred.ClientId
-                ClientSecret = $apiCred.ClientSecret
-                RefreshToken = $apiCred.RefreshToken
-                AccessType   = 'offline'
-            }
-
-            $tokens = Request-AccessToken @reqParams
-            Save-PSYouTubeConfiguration -AccessToken $tokens.access_token -RefreshToken $tokens.refresh_token
+            $refToken = Request-RefreshToken
+            Save-PSYouTubeConfiguration -RefreshToken $refToken
             $invParams = @{
                 IsRetryAttempt = $true
                 Payload        = $Payload
