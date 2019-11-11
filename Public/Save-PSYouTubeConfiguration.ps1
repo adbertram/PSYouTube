@@ -34,6 +34,7 @@ function Save-PSYouTubeConfiguration {
         foreach ($val in $values) {
             $config | Add-Member -NotePropertyName $val.Key -NotePropertyValue (encrypt $val.Value) -Force
         }
-        $config | ConvertTo-Json | Set-Content -Path "$PSScriptRoot\configuration.json"
+        $configJsonPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'Configuration.json'
+        $config | ConvertTo-Json | Set-Content -Path $configJsonPath
     }
 }

@@ -37,7 +37,7 @@ function Get-PSYouTubeConfiguration {
             return $plain
         }
     
-        $configJsonPath = "$PSScriptRoot\Configuration.json"
+        $configJsonPath = Join-Path -Path (Split-Path -Path $PSScriptRoot -Parent) -ChildPath 'Configuration.json'
         if (-not (Test-Path -Path $configJsonPath)) {
             throw 'The required Configuration.json file could not be found.'
         }
