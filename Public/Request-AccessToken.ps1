@@ -37,7 +37,7 @@ function Request-AccessToken {
             $scopes += "https://www.googleapis.com/auth/$s"
         }
         $payload += @{
-            'scope'                  = [System.Uri]::EscapeUriString($scopes -join ' ')
+            'scope'                  = $scopes -join ' '
             'access_type'            = 'offline'
             'include_granted_scopes' = 'true'
             'response_type'          = 'code'
