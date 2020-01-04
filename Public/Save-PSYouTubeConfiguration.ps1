@@ -16,6 +16,11 @@ function Save-PSYouTubeConfiguration {
         [string]$RefreshToken,
 
         [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [ValidateSet('Access', 'Refresh')]
+        [string]$ActiveToken = 'Access',
+
+        [Parameter()]
         [string]$APIKey
     )
 
