@@ -12,7 +12,7 @@ function Request-AccessToken {
 		
         [Parameter()]
         [ValidateNotNullOrEmpty()]
-        [string[]]$Scope = 'youtube.force-ssl'
+        [string[]]$Scope = @('youtube.force-ssl', 'yt-analytics.readonly') ## needed for Data and Analytics API
     )
 	
     $ErrorActionPreference = 'Stop'

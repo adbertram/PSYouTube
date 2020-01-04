@@ -22,7 +22,7 @@ function Request-RefreshToken {
 	
     $ErrorActionPreference = 'Stop'
     try {
-        $config = Get-PSYoutubeConfiguration
+        $config = Get-PSYoutubeConfiguration -Decrypt
         if (-not $PSBoundParameters.ContainsKey('ClientId')) {
             $ClientId = $config.ClientId
         }
